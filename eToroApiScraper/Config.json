@@ -1,0 +1,14 @@
+{
+  "BaseConfig": {
+    "CacheDir": "F:\\eToroScraper"
+  },
+  "ChromeDriverConfig": {
+  },
+  "EtoroConfig": {
+    "Username": "n4czq7YPeHMbbIU7xscXgw==",
+    "Password": "dov9xPh6Hz8eYNpBkoz3VA==",
+    "Watchlists": [
+      "i/mTuizQWAJc0UK/ZAU8yR7uDtMClgjtTHlXBeFr/hZdDR9CdjloB6NqZWh/sAjY"
+    ]
+  }
+}
