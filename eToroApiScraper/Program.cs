@@ -72,10 +72,8 @@ namespace eToroApiScraper
 
             while (true)
             {
-                await _services.GetService<IeToroService>().Login();
-
                 Dictionary<string, List<eToroTrade>> tradeData = new Dictionary<string, List<eToroTrade>>();
-                await _services.GetService<IeToroService>().GetAllWatchlistsTraderTrades(tradeData);
+                await _services.GetService<IeToroService>().GetAllWatchlistsPeopleTrades(tradeData);
 
                 foreach (var trader in tradeData)
                 {

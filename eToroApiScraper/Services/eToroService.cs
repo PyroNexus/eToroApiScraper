@@ -1,4 +1,5 @@
 ﻿using eToroApiScraper.Objects;
+using eToroApiScraper.Pages;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenQA.Selenium;
@@ -6,11 +7,15 @@ using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Support.UI;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
+using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 namespace eToroApiScraper.Services
 {
@@ -28,30 +33,28 @@ namespace eToroApiScraper.Services
         readonly ILogger _logger;
         readonly ChromeOptions _driverOptions;
 
-        static string username;
-        static string password;
+        readonly string _username;
+        readonly string _password;
+        readonly List<string> _watchlists;
 
-        private List<string> watchlists;
-
-        static readonly Uri watchlistsUri = new Uri("https://www.etoro.com/watchlists/");
-        static readonly string loginUrl = "https://www.etoro.com/login";
-        static readonly Uri apiUri = new Uri("https://www.etoro.com/api/streams/v2/streams/user-trades/");
+        static readonly Uri _watchlistsUri = new Uri("https://www.etoro.com/watchlists/");
+        static readonly string _loginUrl = "https://www.etoro.com/login";
+        static readonly Uri _apiUri = new Uri("https://www.etoro.com/api/streams/v2/streams/user-trades/");
 
         public eToroService(IOptions<eToroServiceOptions> options, ILogger<eToroService> logger)
         {
             _logger = logger;
 
-            username = options.Value.Username;
-            password = options.Value.Password;
-            watchlists = options.Value.Watchlists;
+            _username = options.Value.Username;
+            _password = options.Value.Password;
+            _watchlists = options.Value.Watchlists;
 
             _driverOptions = new ChromeOptions();
             _driverOptions.AddExcludedArgument("enable-automation");
-            _driverOptions.AddAdditionalCapability("useAutomationExtension", false);
-            _driverOptions.AddArgument(string.Format("--user-agent={0}", options.Value.UserAgent));
+            _driverOptions.AddArgument($"--user-agent={options.Value.UserAgent}");
             _driverOptions.AddArgument("--start-maximized");
             _driverOptions.AddArgument("--disable-blink-features=AutomationControlled");
-            _driverOptions.AddArgument(string.Format("user-data-dir={0}", options.Value.UserDataDir));
+            _driverOptions.AddArgument($"user-data-dir={options.Value.UserDataDir}");
         }
 
         IWebDriver _driver;
@@ -62,81 +65,98 @@ namespace eToroApiScraper.Services
                 if (_driver == null)
                 {
                     _driver = new ChromeDriver(_driverOptions);
-                    _driver.Url = watchlistsUri.ToString();
+                    _driver.Url = _watchlistsUri.ToString();
                 }
                 return _driver;
             }
         }
 
-        public void Dispose()
+        public void Dispose() => Dispose(true);
+
+        void Dispose(bool disposing)
         {
             if (_driver != null)
             {
                 _driver.Close();
-                _driver.Quit();
-                _driver.Dispose();
+                if (disposing)
+                {
+                    _driver.Quit();
+                    _driver.Dispose();
+                }
                 _driver = null;
             }
         }
 
-        bool IsLoggedIn() => GetMyProfileLink() != null;
-        IReadOnlyCollection<IWebElement> GetMyProfileLink() =>
-            WaitUntilElementsAreVisible(By.CssSelector(string.Format("a[automation-id='menu-user-page-link'][href='/people/{0}']", username)));
-        IReadOnlyCollection<IWebElement> GetWatchlistProfile(string trader = null) =>
+        void HupDriver()
+        {
+            _logger.LogInformation("Attempting to restart driver...");
+            Dispose(false);
+        }
+
+        bool IsLoggedIn() => GetMyPeopleLink() != null;
+        IReadOnlyCollection<IWebElement> GetMyPeopleLink() =>
+            WaitUntilElementsAreVisible(By.CssSelector(string.Format("a[automation-id='menu-user-page-link'][href='/people/{0}']", _username)));
+        IReadOnlyCollection<IWebElement> GetWatchlistPeopleLink(string trader = null) =>
             WaitUntilElementsAreVisible(By.CssSelector(string.Format("a.card-avatar-wrap[href^='/people/{0}']", trader)));
 
-        public async Task GetAllWatchlistsTraderTrades(Dictionary<string, List<eToroTrade>> tradeData)
+        IWebElement LoginField => WaitUntilElementsAreVisible(Pages.Login.input_Username).Single();
+        IWebElement PasswordField => WaitUntilElementsAreVisible(Pages.Login.input_Password).Single();
+        IWebElement SignInButton => WaitUntilElementsAreVisible(Pages.Login.button_SignIn).Single();
+
+
+        public async Task GetAllWatchlistsPeopleTrades(Dictionary<string, List<eToroTrade>> tradeData)
         {
-            foreach (string watchlist in watchlists)
+            try
             {
-                await GetWatchlistTraderTrades(tradeData, new Uri(watchlistsUri, watchlist));
+                foreach (string watchlist in _watchlists)
+                    await GetWatchlistPeopleTrades(tradeData, new Uri(_watchlistsUri, watchlist));
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "Error obtaining all watchlist people trades.");
+                HupDriver();
             }
         }
 
-        public async Task GetWatchlistTraderTrades(Dictionary<string, List<eToroTrade>> tradeData, Uri watchlistUri)
+        async Task GetWatchlistPeopleTrades(Dictionary<string, List<eToroTrade>> tradeData, Uri watchlistUri)
         {
-            driver.Navigate().GoToUrl(watchlistsUri);
+            await Login();
+
+            driver.Navigate().GoToUrl(_watchlistsUri);
             await Task.Delay(TimeSpan.FromSeconds(2.5));
             driver.Navigate().GoToUrl(watchlistUri);
 
             var traders = new List<string>();
 
-            foreach (var trader in GetWatchlistProfile())
-            {
-                traders.Add(trader.Text.ToLower());
-            }
+            foreach (var profileLinks in GetWatchlistPeopleLink())
+                traders.Add(profileLinks.Text.ToLower());
 
             foreach (var trader in traders)
             {
-                var profile = GetWatchlistProfile(trader);
-                if (profile == null)
+                var peopleLink = GetWatchlistPeopleLink(trader);
+                if (peopleLink == null)
                 {
-                    _logger.LogError("Unable to get trades for trader {0}", trader);
+                    _logger.LogError("Unable to get profile link for trader {0}", trader);
+                    continue;
                 }
-                await GetTradesForProfileLink(profile.Single(), tradeData);
+                await GetTradesForPeopleLink(peopleLink.Single(), tradeData);
                 await Task.Delay(TimeSpan.FromSeconds(2.5));
-                driver.Navigate().GoToUrl(watchlistsUri);
+                driver.Navigate().GoToUrl(_watchlistsUri);
                 await Task.Delay(TimeSpan.FromSeconds(2.5));
                 driver.Navigate().GoToUrl(watchlistUri);
             }
         }
 
-        public class Trader
+        async Task GetTradesForPeopleLink(IWebElement peopleLink, Dictionary<string, List<eToroTrade>> tradeData)
         {
-            public string Name { get; set; }
-            public string Selector { get; set; }
-        }
-
-        async Task GetTradesForProfileLink(IWebElement profileLink, Dictionary<string, List<eToroTrade>> tradeData)
-        {
+            string trader = peopleLink.Text.ToLower();
             try
             {
-                var trader = profileLink.Text;
-                profileLink.Click();
-                var profileNav = WaitUntilElementsAreVisible(By.CssSelector("a[automation-id='user-head-navigation-wrapp-portfolio']")).Single();
-                profileNav.Click();
+                peopleLink.Click();
+                var portfolioLink = WaitUntilElementsAreVisible(People.PortfolioLink).Single();
+                portfolioLink.Click();
                 await Task.Delay(TimeSpan.FromSeconds(2.5));
-                driver.Navigate().GoToUrl(new Uri(apiUri, trader));
+                driver.Navigate().GoToUrl(new Uri(_apiUri, trader));
                 await Task.Delay(TimeSpan.FromSeconds(2.5));
 
                 var data = WaitUntilElementsAreVisible(By.CssSelector("body")).Single().Text;
@@ -145,51 +165,56 @@ namespace eToroApiScraper.Services
             }
             catch
             {
-                _logger.LogError("Unable to get trades");
+                _logger.LogError("Unable to get trades for trader {0}", trader);
             }
         }
 
         public async Task Login()
         {
+            if (IsLoggedIn())
+                return;
+
             var tries = 0;
             var maxTries = 2;
 
             startlogin:
-            if (driver.Url == loginUrl)
+            try
             {
-                var wait = new WebDriverWait(driver, new TimeSpan(0, 1, 0));
-
-                var byUsername = By.CssSelector("input[automation-id='login-sts-username-input']");
-                var byPassword = By.CssSelector("input[automation-id='login-sts-password-input']");
-                var bySignInButton = By.CssSelector("button[automation-id='login-sts-btn-sign-in']");
-
-                wait.Until(e => e.FindElement(byUsername));
-
-                var usernameField = driver.FindElement(byUsername);
-                var passwordField = driver.FindElement(byPassword);
-                var signInButton = driver.FindElement(bySignInButton);
-
-                usernameField.Click();
-                usernameField.SendKeys(username);
-                await Task.Delay(TimeSpan.FromSeconds(1));
-                passwordField.Click();
-                passwordField.SendKeys(password);
-                await Task.Delay(TimeSpan.FromSeconds(1));
-                signInButton.Click();
-            }
-
-            if (!IsLoggedIn())
-            {
-                _logger.LogError("I am not logged in");
-
-                if (tries >= maxTries)
+                if (driver.Url == _loginUrl)
                 {
-                    throw new Exception("Unable to login");
+                    _logger.LogInformation("Attempting to login...");
+                    LoginField.Click();
+                    LoginField.Clear();
+                    LoginField.SendKeys(_username);
+                    await Task.Delay(TimeSpan.FromSeconds(1));
+
+                    PasswordField.Click();
+                    PasswordField.Clear();
+                    PasswordField.SendKeys(_password);
+                    await Task.Delay(TimeSpan.FromSeconds(1));
+
+                    SignInButton.Click();
                 }
 
-                driver.Navigate().GoToUrl(watchlistsUri);
-                await Task.Delay(TimeSpan.FromSeconds(60));
-                tries += 1;
+                if (!IsLoggedIn())
+                {
+                    _logger.LogError("I am not logged in");
+
+                    if (tries >= maxTries)
+                    {
+                        throw new Exception("Unable to login");
+                    }
+
+                    driver.Navigate().GoToUrl(_watchlistsUri);
+                    await Task.Delay(TimeSpan.FromSeconds(60));
+                    tries += 1;
+                    goto startlogin;
+                }
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "Error while logging in.");
+                HupDriver();
                 goto startlogin;
             }
         }
@@ -199,14 +224,13 @@ namespace eToroApiScraper.Services
             var wait = new WebDriverWait(driver, TimeSpan.FromMinutes(1));
             try
             {
-                var elements = wait.Until(e => {
+                return wait.Until(e => {
                     var el = e.FindElements(by);
                     if (el.Any())
                         return el;
                     else
                         return null;
                 });
-                return elements;
             }
             catch (WebDriverTimeoutException exception)
             {
@@ -215,9 +239,9 @@ namespace eToroApiScraper.Services
                     _logger.LogError(exception, "Could not find element {0}", by.ToString());
                     return null;
                 }
+                _logger.LogError(exception, "An unexpected error occurred processing {0}", by.ToString());
                 throw exception;
             }
         }
-
     }
 }

@@ -8,6 +8,6 @@ namespace eToroApiScraper.Services
     public interface IeToroService
     {
         Task Login();
-        Task GetAllWatchlistsTraderTrades(Dictionary<string, List<eToroTrade>> tradeData);
+        Task GetAllWatchlistsPeopleTrades(Dictionary<string, List<eToroTrade>> tradeData);
     }
 }
