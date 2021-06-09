@@ -13,6 +13,7 @@ using System.IO;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using System.Threading.Tasks;
+using System.Threading;
 
 namespace eToroApiScraper
 {
@@ -43,45 +44,55 @@ namespace eToroApiScraper
 
         static async Task Main(string[] args)
         {
-            _config = new Config("Config.json");
-
-            _services = new ServiceCollection()
-                .AddOptions()
-                .Configure<eToroServiceOptions>(options => {
-                    options.UserAgent = _config.ChromeDriver.UserAgent;
-                    options.UserDataDir = Path.Combine(_config.Base.CacheDir, "ChromeCache");
-                    options.Username = _config.Etoro.Username;
-                    options.Password = _config.Etoro.Password;
-                    options.Watchlists = _config.Etoro.Watchlists;
-                })
-                .AddSingleton<IeToroService, eToroService>()
-                .AddLogging(logging =>
-                {
-                    logging.SetMinimumLevel(LogLevel.Trace);
-                    logging.AddNLog(new NLogProviderOptions
-                    {
-                        CaptureMessageProperties = true,
-                        CaptureMessageTemplates = true
-                    });
-                })
-                .BuildServiceProvider();
-
-            _logger = _services.GetService<ILoggerFactory>().CreateLogger<Program>();
-            _logger.LogInformation("Starting up...");
-
-
-            while (true)
+            bool createdNew;
+            using (Mutex mutex = new Mutex(true, "eToroApiScraper", out createdNew))
             {
-                Dictionary<string, List<eToroTrade>> tradeData = new Dictionary<string, List<eToroTrade>>();
-                await _services.GetService<IeToroService>().GetAllWatchlistsPeopleTrades(tradeData);
+                _config = new Config("Config.json");
 
-                foreach (var trader in tradeData)
+                _services = new ServiceCollection()
+                    .AddOptions()
+                    .Configure<eToroServiceOptions>(options => {
+                        options.UserAgent = _config.ChromeDriver.UserAgent;
+                        options.UserDataDir = Path.Combine(_config.Base.CacheDir, "ChromeCache");
+                        options.Username = _config.Etoro.Username;
+                        options.Password = _config.Etoro.Password;
+                        options.Watchlists = _config.Etoro.Watchlists;
+                    })
+                    .AddSingleton<IeToroService, eToroService>()
+                    .AddLogging(logging =>
+                    {
+                        logging.SetMinimumLevel(LogLevel.Trace);
+                        logging.AddNLog(new NLogProviderOptions
+                        {
+                            CaptureMessageProperties = true,
+                            CaptureMessageTemplates = true
+                        });
+                    })
+                    .BuildServiceProvider();
+
+                _logger = _services.GetService<ILoggerFactory>().CreateLogger<Program>();
+                _logger.LogInformation("Starting up...");
+
+                if (!createdNew)
                 {
-                    File.WriteAllText(Path.Combine(_config.Base.CacheDir, "TraderCache", trader.Key + ".json"), JsonSerializer.Serialize(trader.Value));
+                    _logger.LogWarning("Program is already running... quitting.");
+                    return;
                 }
 
-                await Task.Delay(TimeSpan.FromMinutes(10));
+                while (true)
+                {
+                    Dictionary<string, List<eToroTrade>> tradeData = new Dictionary<string, List<eToroTrade>>();
+                    await _services.GetService<IeToroService>().GetAllWatchlistsPeopleTrades(tradeData);
+
+                    foreach (var trader in tradeData)
+                    {
+                        File.WriteAllText(Path.Combine(_config.Base.CacheDir, "TraderCache", trader.Key + ".json"), JsonSerializer.Serialize(trader.Value));
+                    }
+
+                    await Task.Delay(TimeSpan.FromMinutes(10));
+                }
             }
+            
         }
     }
 }

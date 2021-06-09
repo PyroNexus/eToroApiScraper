@@ -177,7 +177,7 @@ namespace eToroApiScraper.Services
             var tries = 0;
             var maxTries = 2;
 
-            startlogin:
+            start:
             try
             {
                 if (driver.Url == _loginUrl)
@@ -208,39 +208,44 @@ namespace eToroApiScraper.Services
                     driver.Navigate().GoToUrl(_watchlistsUri);
                     await Task.Delay(TimeSpan.FromSeconds(60));
                     tries += 1;
-                    goto startlogin;
+                    goto start;
                 }
             }
             catch (Exception exception)
             {
                 _logger.LogError(exception, "Error while logging in.");
                 HupDriver();
-                goto startlogin;
+                goto start;
             }
         }
 
         IReadOnlyCollection<IWebElement> WaitUntilElementsAreVisible(By by)
         {
             var wait = new WebDriverWait(driver, TimeSpan.FromMinutes(1));
+            var tries = 0;
+            var maxTries = 2;
+            start:
             try
             {
-                return wait.Until(e => {
-                    var el = e.FindElements(by);
-                    if (el.Any())
-                        return el;
+                tries += 1;
+                return wait.Until(driver => {
+                    var elements = driver.FindElements(by);
+                    if (elements != null && elements.Any())
+                        return elements;
                     else
                         return null;
                 });
             }
             catch (WebDriverTimeoutException exception)
             {
-                if (exception.InnerException.GetType() == typeof(NoSuchElementException))
-                {
-                    _logger.LogError(exception, "Could not find element {0}", by.ToString());
-                    return null;
-                }
-                _logger.LogError(exception, "An unexpected error occurred processing {0}", by.ToString());
-                throw exception;
+                _logger.LogError(exception, "Timed out looking for element {0}", by.ToString());
+
+                if (tries >= maxTries)
+                    throw exception;
+
+                _logger.LogInformation("Will refresh the page and retry in 1 minute...");
+                driver.Navigate().Refresh();
+                goto start;
             }
         }
     }
