@@ -85,14 +85,11 @@ namespace eToroApiScraper
                     await _services.GetService<IeToroService>().GetAllWatchlistsPeopleTrades(tradeData);
 
                     foreach (var trader in tradeData)
-                    {
                         File.WriteAllText(Path.Combine(_config.Base.CacheDir, "TraderCache", trader.Key + ".json"), JsonSerializer.Serialize(trader.Value));
-                    }
 
                     await Task.Delay(TimeSpan.FromMinutes(10));
                 }
             }
-            
         }
     }
 }

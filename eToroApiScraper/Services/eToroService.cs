@@ -77,12 +77,10 @@ namespace eToroApiScraper.Services
         {
             if (_driver != null)
             {
-                _driver.Close();
+                _driver.Quit();
                 if (disposing)
-                {
-                    _driver.Quit();
                     _driver.Dispose();
-                }
+
                 _driver = null;
             }
         }
@@ -93,9 +91,9 @@ namespace eToroApiScraper.Services
             Dispose(false);
         }
 
-        bool IsLoggedIn() => GetMyPeopleLink() != null;
-        IReadOnlyCollection<IWebElement> GetMyPeopleLink() =>
-            WaitUntilElementsAreVisible(By.CssSelector(string.Format("a[automation-id='menu-user-page-link'][href='/people/{0}']", _username)));
+        bool IsLoggedIn() => GetMyPeopleLink(0) != null;
+        IReadOnlyCollection<IWebElement> GetMyPeopleLink(int maxTries) =>
+            WaitUntilElementsAreVisible(By.CssSelector(string.Format("a[automation-id='menu-user-page-link'][href='/people/{0}']", _username)), maxTries: maxTries);
         IReadOnlyCollection<IWebElement> GetWatchlistPeopleLink(string trader = null) =>
             WaitUntilElementsAreVisible(By.CssSelector(string.Format("a.card-avatar-wrap[href^='/people/{0}']", trader)));
 
@@ -133,40 +131,41 @@ namespace eToroApiScraper.Services
 
             foreach (var trader in traders)
             {
-                var peopleLink = GetWatchlistPeopleLink(trader);
-                if (peopleLink == null)
+                try
                 {
-                    _logger.LogError("Unable to get profile link for trader {0}", trader);
-                    continue;
+                    var peopleLink = GetWatchlistPeopleLink(trader);
+                    if (peopleLink == null)
+                    {
+                        _logger.LogError("Unable to get profile link for trader {0}", trader);
+                        continue;
+                    }
+                    await GetTradesForPeopleLink(peopleLink.Single(), tradeData);
+                    await Task.Delay(TimeSpan.FromSeconds(2.5));
+                    driver.Navigate().GoToUrl(_watchlistsUri);
+                    await Task.Delay(TimeSpan.FromSeconds(2.5));
+                    driver.Navigate().GoToUrl(watchlistUri);
                 }
-                await GetTradesForPeopleLink(peopleLink.Single(), tradeData);
-                await Task.Delay(TimeSpan.FromSeconds(2.5));
-                driver.Navigate().GoToUrl(_watchlistsUri);
-                await Task.Delay(TimeSpan.FromSeconds(2.5));
-                driver.Navigate().GoToUrl(watchlistUri);
+                catch
+                {
+                    _logger.LogError("Unable to get trades for trader {0}", trader);
+                }
             }
         }
 
         async Task GetTradesForPeopleLink(IWebElement peopleLink, Dictionary<string, List<eToroTrade>> tradeData)
         {
             string trader = peopleLink.Text.ToLower();
-            try
-            {
-                peopleLink.Click();
-                var portfolioLink = WaitUntilElementsAreVisible(People.PortfolioLink).Single();
-                portfolioLink.Click();
-                await Task.Delay(TimeSpan.FromSeconds(2.5));
-                driver.Navigate().GoToUrl(new Uri(_apiUri, trader));
-                await Task.Delay(TimeSpan.FromSeconds(2.5));
 
-                var data = WaitUntilElementsAreVisible(By.CssSelector("body")).Single().Text;
+            peopleLink.Click();
+            var portfolioLink = WaitUntilElementsAreVisible(People.PortfolioLink).Single();
+            portfolioLink.Click();
+            await Task.Delay(TimeSpan.FromSeconds(2.5));
+            driver.Navigate().GoToUrl(new Uri(_apiUri, trader));
+            await Task.Delay(TimeSpan.FromSeconds(2.5));
 
-                tradeData.Add(trader, JsonSerializer.Deserialize<List<eToroTrade>>(data));
-            }
-            catch
-            {
-                _logger.LogError("Unable to get trades for trader {0}", trader);
-            }
+            var data = WaitUntilElementsAreVisible(By.CssSelector("body")).Single().Text;
+
+            tradeData.Add(trader, JsonSerializer.Deserialize<List<eToroTrade>>(data));
         }
 
         public async Task Login()
@@ -219,11 +218,10 @@ namespace eToroApiScraper.Services
             }
         }
 
-        IReadOnlyCollection<IWebElement> WaitUntilElementsAreVisible(By by)
+        IReadOnlyCollection<IWebElement> WaitUntilElementsAreVisible(By by, int maxTries = 2)
         {
             var wait = new WebDriverWait(driver, TimeSpan.FromMinutes(1));
             var tries = 0;
-            var maxTries = 2;
             start:
             try
             {
@@ -241,7 +239,7 @@ namespace eToroApiScraper.Services
                 _logger.LogError(exception, "Timed out looking for element {0}", by.ToString());
 
                 if (tries >= maxTries)
-                    throw exception;
+                    return null;
 
                 _logger.LogInformation("Will refresh the page and retry in 1 minute...");
                 driver.Navigate().Refresh();
