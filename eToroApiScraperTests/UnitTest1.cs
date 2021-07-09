@@ -11,7 +11,7 @@ namespace eToroScraperTests
         {
             var plaintext = "hello";
 
-            var helper = new CryptoHelper(CryptoHelper.NewKeyIV());
+            var helper = new CryptoHelper(CryptoHelper.NewKey());
 
             var encrypted = helper.EncryptString(plaintext);
 
@@ -23,9 +23,9 @@ namespace eToroScraperTests
         [TestMethod]
         public void Test_Decrypt()
         {
-            var helper = new CryptoHelper("s/XmBX61n7hqVgx1tzxrCMqysnAXKKafKpOOrpcvi8E=", "DPmvJtZDGVgr2JJ68foltA==");
+            var helper = new CryptoHelper("s/XmBX61n7hqVgx1tzxrCMqysnAXKKafKpOOrpcvi8E=");
 
-            var decrypted = helper.DecryptString("It9U488Qsp5DYAzR2zty9w==");
+            var decrypted = helper.DecryptString("jqV0yxsliCJ/LeZRXjGJdjhn00b+o/FgSGJ8jwD60oE=");
 
             Assert.IsTrue("hello" == decrypted);
         }
@@ -33,21 +33,22 @@ namespace eToroScraperTests
         [TestMethod]
         public void Test_Encrypt()
         {
-            var helper = new CryptoHelper("s/XmBX61n7hqVgx1tzxrCMqysnAXKKafKpOOrpcvi8E=", "DPmvJtZDGVgr2JJ68foltA==");
+            var helper = new CryptoHelper("s/XmBX61n7hqVgx1tzxrCMqysnAXKKafKpOOrpcvi8E=");
 
             var encrypted = helper.EncryptString("hello");
 
-            Assert.IsTrue("It9U488Qsp5DYAzR2zty9w==" == encrypted);
+            Assert.IsTrue(helper.DecryptString("jyErNIk+tYYV5mwRMHSrNN//SJF1wxc6yrJU4Uclpeo=") == helper.DecryptString(encrypted));
         }
 
-        [TestMethod]
-        public void Test_Encrypt2()
-        {
-            var helper = new CryptoHelper();
+        //[TestMethod]
+        //public void Test_Encrypt2()
+        //{
+        //    var key = CryptoHelper.NewKey();
+        //    var helper = new CryptoHelper(key);
 
-            var encrypted = helper.EncryptString("");
-            var encrypted2 = helper.EncryptString("");
-            var encrypted3 = helper.EncryptString("");
-        }
+        //    var encrypted = helper.EncryptString("");
+        //    var encrypted2 = helper.EncryptString("");
+        //    var encrypted3 = helper.EncryptString("");
+        //}
     }
 }

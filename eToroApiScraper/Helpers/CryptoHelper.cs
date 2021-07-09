@@ -1,57 +1,34 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
-using System.Text;
+using System.Linq;
 
 namespace eToroApiScraper.Helpers
 {
     public class CryptoHelper
     {
-        public class KeyIV
-        {
-            public byte[] Key;
-            public byte[] IV;
-        }
-
         private readonly byte[] Key;
-        private readonly byte[] IV;
-
-        private static string FromEnvVar(string envVarName) => Environment.GetEnvironmentVariable(envVarName);
 
         public CryptoHelper()
-            : this(FromEnvVar("PyroNexusConfigKey"), FromEnvVar("PyronexusConfigIV"))
+            : this(Environment.GetEnvironmentVariable("PyroNexusConfigKey"))
         { }
 
-        public CryptoHelper(string key, string iv)
-            : this(new KeyIV() { Key = Convert.FromBase64String(key), IV = Convert.FromBase64String(iv) })
-        { }
+        public CryptoHelper(string key) => Key = Convert.FromBase64String(key);
 
-        public CryptoHelper(KeyIV keyIV)
-        {
-            Key = keyIV.Key;
-            IV = keyIV.IV;
-        }
-
-        public static KeyIV NewKeyIV()
+        public static string NewKey()
         {
             using Aes aes = Aes.Create();
             aes.GenerateKey();
-            aes.GenerateIV();
-            return new KeyIV()
-            {
-                Key = aes.Key,
-                IV = aes.IV
-            };
+            return Convert.ToBase64String(aes.Key);
         }
 
         public string EncryptString(string plainText)
         {
-            byte[] array;
+            byte[] buffer;
 
             using Aes aes = Aes.Create();
             aes.Key = Key;
-            aes.IV = IV;
+            aes.GenerateIV();
 
             using MemoryStream memoryStream = new MemoryStream();
             using CryptoStream cryptoStream = new CryptoStream(memoryStream, aes.CreateEncryptor(), CryptoStreamMode.Write);
@@ -59,9 +36,9 @@ namespace eToroApiScraper.Helpers
             {
                 streamWriter.Write(plainText);
             }
-            array = memoryStream.ToArray();
+            buffer = memoryStream.ToArray();
 
-            return Convert.ToBase64String(array);
+            return Convert.ToBase64String(Enumerable.Concat(aes.IV, buffer).ToArray());
         }
 
         public string DecryptString(string cipherText)
@@ -71,9 +48,10 @@ namespace eToroApiScraper.Helpers
             using Aes aes = Aes.Create();
 
             aes.Key = Key;
-            aes.IV = IV;
+            aes.IV = buffer.Take(16).ToArray();
+            var data = buffer.TakeLast(buffer.Length - 16).ToArray();
 
-            using MemoryStream memoryStream = new MemoryStream(buffer);
+            using MemoryStream memoryStream = new MemoryStream(data);
             using CryptoStream cryptoStream = new CryptoStream(memoryStream, aes.CreateDecryptor(), CryptoStreamMode.Read);
             using StreamReader streamReader = new StreamReader(cryptoStream);
             return streamReader.ReadToEnd();

@@ -200,9 +200,7 @@ namespace eToroApiScraper.Services
                     _logger.LogError("I am not logged in");
 
                     if (tries >= maxTries)
-                    {
                         throw new Exception("Unable to login");
-                    }
 
                     driver.Navigate().GoToUrl(_watchlistsUri);
                     await Task.Delay(TimeSpan.FromSeconds(60));
